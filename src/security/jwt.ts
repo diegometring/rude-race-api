@@ -8,8 +8,8 @@ if (!JWT_SECRET) {
     throw new Error('JWT_SECRET não está definido no .env');
 }
 
-export const generateToken = (payload: object, expiresIn: string | number = '1h'): string => {
-    const options: SignOptions = {expiresIn};
+export const generateToken = (payload: object, tokenExpiresIn: string | number = '1h'): string => {
+    const options: SignOptions = {expiresIn: tokenExpiresIn};
     return jwt.sign(payload, JWT_SECRET, options);
 };
 
