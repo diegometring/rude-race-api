@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, {SignOptions} from 'jsonwebtoken';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -9,7 +9,8 @@ if (!JWT_SECRET) {
 }
 
 export const generateToken = (payload: object, expiresIn: string | number = '1h'): string => {
-    return jwt.sign(payload, JWT_SECRET, { expiresIn });
+    const options: SignOptions = {expiresIn};
+    return jwt.sign(payload, JWT_SECRET, options);
 };
 
 export const verifyToken = (token: string): any | null => {

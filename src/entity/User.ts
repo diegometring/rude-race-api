@@ -1,9 +1,9 @@
 import 'reflect-metadata'; 
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from "typeorm"; 
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, PrimaryColumn } from "typeorm"; 
 
 @Entity('User') 
 export class User {
-    @PrimaryGeneratedColumn('id')
+    @PrimaryColumn('id')
     id!: string;
 
     @Column({ type: 'varchar', length: 255, unique: true, nullable: false })
