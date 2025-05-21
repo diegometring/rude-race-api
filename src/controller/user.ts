@@ -1,5 +1,10 @@
+import 'reflect-metadata'
 import { Request, Response } from 'express';
 import { findOrCreateUser } from '../services/userService';
+import { AppDataSource } from '../data-source';
+import { User } from '../entity/User';
+import { Match } from '../entity/Match';
+import { Between } from 'typeorm';
 
 export const createUser = async (req: Request, res: Response): Promise<void> => {
     const { name } = req.body;
@@ -31,3 +36,101 @@ export const getAuthenticatedUser = async (req: Request, res: Response): Promise
     }
     res.status(200).json({ userId });
 };
+
+export const getPlayerScore = async (req: Request, res: Response): Promise<void> => {
+  const playerId = Number(req.params.id);
+
+  if (isNaN(playerId)) {
+    res.status(400).json({ error: 'ID inválido' });
+  }
+
+  const playerRepo = AppDataSource.getRepository(User);
+  const player = await playerRepo.findOneBy({ id: playerId });
+
+  if (!player) {
+    res.status(404).json({ error: 'Jogador não encontrado' });
+  }
+
+  res.json({ id: player!.id, name: player!.name });
+};
+
+export const getScoreByDate = async (req: Request, res: Response): Promise<void>  => {
+    const { id } = req.params;
+    const { date } = req.query;
+
+    if (!date) res.status(400).json({ message: "Missing date query param" });
+
+    const matches = await AppDataSource.getRepository(Match).find({
+        where: {
+            user: { id: Number(id) },
+            playedAt: Between(new Date(`${date}T00:00:00Z`), new Date(`${date}T23:59:59Z`))
+        }
+    });
+
+    res.json(matches);
+};
+
+export const getBestScore = async (req: Request, res: Response): Promise<void>  => {
+    const { id } = req.params;
+
+    const bestMatch = await AppDataSource.getRepository(Match).findOne({
+        where: { user: { id: Number(id) } },
+        order: { score: 'DESC' },
+    });
+
+    res.json(bestMatch);
+};
+
+export const getMatchHistory = async (req: Request, res: Response): Promise<void>  => {
+    const { id } = req.params;
+
+    const matches = await AppDataSource.getRepository(Match).find({
+        where: { user: { id: Number(id) } },
+        order: { playedAt: 'DESC' },
+    });
+
+    res.json(matches);
+};
+
+export const getTopMatches = async (req: Request, res: Response): Promise<void>  => {
+    const { id } = req.params;
+    const limit = parseInt(req.query.limit as string) || 10;
+
+    const matches = await AppDataSource.getRepository(Match).find({
+        where: { user: { id: Number(id) } },
+        order: { score: 'DESC' },
+        take: limit,
+    });
+
+    res.json(matches);
+};
+
+export const createMatch = async (req: Request, res: Response): Promise<void>  => {
+    const { id } = req.params;
+    const { score, playedAt } = req.body;
+
+    const userRepository = AppDataSource.getRepository(User);
+    const matchRepository = AppDataSource.getRepository(Match);
+
+    const user = await userRepository.findOneBy({ id: Number(id) });
+
+    if (!user) {
+        res.status(404).json({ message: 'User not found' });
+        return;
+    }
+    if (typeof score !== 'number') {
+        res.status(400).json({ message: 'Score must be a number' });
+        return;
+    }
+
+    const match = new Match();
+    match.user = user;
+    match.score = score;
+    match.playedAt = playedAt ? new Date(playedAt) : new Date();
+    
+    await matchRepository.save(match);
+
+    res.status(201).json(match);
+    return;
+};
+

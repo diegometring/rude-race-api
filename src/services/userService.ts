@@ -1,9 +1,10 @@
+import 'reflect-metadata';
 import { AppDataSource } from '../data-source';
 import { User } from '../entity/User';
 import { generateToken } from '../security/jwt';
 
 export interface UserResponse {
-    id: string;
+    id: number;
     name: string;
     token?: string;
 }
