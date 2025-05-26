@@ -1,243 +1,256 @@
-import Phaser, { Scene } from "phaser";
+import Phaser from "phaser";
+import io from "socket.io-client";
 
 class MainScene extends Phaser.Scene {
+    private socket!: SocketIOClient.Socket;
     private background!: Phaser.GameObjects.TileSprite;
     private car!: Phaser.Physics.Arcade.Sprite;
     private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
-    private carSpeed: number = 200;
     private normalSpeed: number = 200;
     private slowSpeed: number = 50;
+    private currentSpeed: number = 200;
     private slowDuration: number = 2000;
     private obstacles!: Phaser.Physics.Arcade.Group;
     private npcs!: Phaser.Physics.Arcade.Group;
-    private startLine!: Phaser.Physics.Arcade.StaticGroup;
     private finishLine!: Phaser.Physics.Arcade.Sprite;
-    private npc1!: Phaser.Physics.Arcade.Sprite;
-    private npc2!: Phaser.Physics.Arcade.Sprite;
     private barriers!: Phaser.Physics.Arcade.StaticGroup;
-
+    private playerId: string = '';
+    private isSlowed: boolean = false;
+    private lastUpdate: number = 0;
 
     constructor() {
         super({ key: "MainScene" });
     }
 
+    init() {
+        // Conecta ao servidor Socket.io (certifique-se que o servidor está rodando)
+        this.socket = io("http://localhost:3001");
+
+        this.socket.on("connect", () => {
+            console.log("Conectado ao servidor Socket.io");
+            this.playerId = this.socket.id;
+        });
+    }
+
     preload() {
+        // Carrega assets - ATUALIZE OS CAMINHOS CONFORME SUA ESTRUTURA
         this.load.image("background", "assets/RoadTile/01/1.png");
         this.load.image("car", "assets/Motorcycle Body/1.png");
         this.load.image("obstacle", "assets/Obstacle/1.png");
-        this.load.image("npc", "assets/NPCs/1.png"); 
-
+        this.load.image("npc", "assets/NPCs/1.png");
+        this.load.image("finish_line", "assets/line.png");
     }
 
     create() {
         const { width, height } = this.cameras.main;
 
-        this.background = this.add.tileSprite(
-            width / 2,
-            height / 2,
-            1026,
-            1798,
-            "background"
-        );
+        // Configuração do cenário
+        this.background = this.add.tileSprite(width / 2, height / 2, width, height, "background");
 
-        this.car = this.physics.add.sprite(width / 2, height - 100, "car").setDisplaySize(88, 100);
-        this.car.setSize(40, 80);     
-        this.car.setOffset(24, 10);   
+        // Configuração do carro do jogador
+        this.car = this.physics.add.sprite(width / 2, height - 100, "car")
+            .setDisplaySize(50, 80)
+            .setCollideWorldBounds(true);
 
-        const barriers = this.physics.add.staticGroup();
+        // Configuração da linha de chegada
+        this.finishLine = this.physics.add.sprite(width / 2, 50, "finish_line")
+            .setDisplaySize(width, 10)
+            .setImmovable(true);
 
-        // Barreira esquerda (invisível)
-        const leftBarrier = barriers.create(50, height / 2, '')
-            .setSize(20, height)  // Define o tamanho da hitbox
-            .setVisible(false);   // Torna invisível
+        // Configuração das barreiras laterais
+        this.setupBarriers(width, height);
 
-        // Barreira direita (invisível)
-        const rightBarrier = barriers.create(width - 50, height / 2, '')
-            .setSize(20, height)  // Define o tamanho da hitbox
-            .setVisible(false);  // Torna invisível
+        // Configuração dos obstáculos (com overlap)
+        this.setupObstacles();
 
-        // Adiciona colisão com o carro
-        this.physics.add.collider(this.car, barriers);
+        // Configuração dos NPCs (com collider normal)
+        this.setupNPCs();
 
+        // Configuração dos controles
+        this.cursors = this.input.keyboard?.createCursorKeys() || {} as Phaser.Types.Input.Keyboard.CursorKeys;
+    }
+
+    private setupBarriers(width: number, height: number) {
+        this.barriers = this.physics.add.staticGroup();
+
+        // Barreira esquerda
+        this.barriers.create(50, height / 2, '')
+            .setSize(20, height)
+            .setVisible(false);
+
+        // Barreira direita
+        this.barriers.create(width - 50, height / 2, '')
+            .setSize(20, height)
+            .setVisible(false);
+
+        this.physics.add.collider(this.car, this.barriers);
+    }
+
+    private setupObstacles() {
         this.obstacles = this.physics.add.group();
 
-        this.physics.add.collider(
-            this.car,
-            this.obstacles,
-            (car, obstacle) => this.handleCollision(car as Phaser.Physics.Arcade.Sprite, obstacle as Phaser.Physics.Arcade.Sprite)
-        );
+        // Usamos overlap para permitir passar através dos obstáculos
+        this.physics.add.overlap(this.car, this.obstacles, (car, obstacle) => {
+            this.handleObstacleOverlap(
+                car as Phaser.Physics.Arcade.Sprite,
+                obstacle as Phaser.Physics.Arcade.Sprite
+            );
+        });
 
-        this.cursors = this.input.keyboard ? this.input.keyboard.createCursorKeys() : {} as Phaser.Types.Input.Keyboard.CursorKeys;
-
+        // Gera obstáculos periodicamente
         this.time.addEvent({
             delay: 2000,
             callback: this.generateObstacle,
             callbackScope: this,
-            loop: true,
+            loop: true
         });
-
-        this.npcs = this.physics.add.group();
-
-        this.physics.add.collider(
-            this.car,
-            this.npcs,
-            (car, npc) => this.handleNpcCollision(car as Phaser.Physics.Arcade.Sprite, npc as Phaser.Physics.Arcade.Sprite)
-        );
-
-        this.time.addEvent({
-            delay: 4000,
-            callback: this.generateNpc,
-            callbackScope: this,
-            loop: true,
-        });
-
-        // Área de largada (grid)
-        this.add.tileSprite(width / 2, height - 150, width, 100, 'grid')
-            .setDepth(0)
-            .setAlpha(0.7);
-
-            this.barriers = this.physics.add.staticGroup();
-
-            // Linha de largada
-            this.startLine = this.barriers.create(width/2, height - 100, 'start_line')
-                .setDisplaySize(width, 10)
-                .refreshBody();
-            
-            // Linha de chegada
-            this.finishLine = this.barriers.create(width/2, 50, 'finish_line')
-                .setDisplaySize(width, 10)
-                .refreshBody();
-
-        // Posiciona os veículos na linha de largada
-        this.positionVehicles();
     }
 
-    private positionVehicles() {
-        const startY = this.cameras.main.height - 120;
-        const spacing = 100; // Espaçamento entre veículos
+    private setupNPCs() {
+        this.npcs = this.physics.add.group();
 
-        // Player
-        this.car = this.physics.add.sprite(
-            this.cameras.main.width / 2 - spacing,
-            startY,
-            "car"
-        ).setDisplaySize(88, 100);
+        // Mantemos collider normal para NPCs (colisão sólida)
+        this.physics.add.collider(this.car, this.npcs, (car, npc) => {
+            this.handleNpcCollision(
+                car as Phaser.Physics.Arcade.Sprite,
+                npc as Phaser.Physics.Arcade.Sprite
+            );
+        });
 
-        // NPCs (exemplo com 2 NPCs)
-        this.npc1 = this.physics.add.sprite(
-            this.cameras.main.width / 2,
-            startY,
-            "npc"
-        ).setDisplaySize(80, 100);
-
-        this.npc2 = this.physics.add.sprite(
-            this.cameras.main.width / 2 + spacing,
-            startY,
-            "npc"
-        ).setDisplaySize(80, 100);
-
-        // Configurações físicas comuns
-        [this.car, this.npc1, this.npc2].forEach(vehicle => {
-            vehicle.setCollideWorldBounds(true);
-            vehicle.setDrag(100);
-            vehicle.setMaxVelocity(200);
+        // Gera NPCs periodicamente
+        this.time.addEvent({
+            delay: 4000,
+            callback: this.generateNPC,
+            callbackScope: this,
+            loop: true
         });
     }
 
     private generateObstacle() {
         const x = Phaser.Math.Between(50, this.cameras.main.width - 50);
-        const obstacle = this.obstacles.create(x, -50, "obstacle").setDisplaySize(107, 133);
-        obstacle.setVelocityY(100);
-        obstacle.setImmovable(true);
-        obstacle.body.setSize(70, 100);     // ajusta a hitbox do obstáculo
-        obstacle.body.setOffset(18, 15);    // centraliza melhor no sprite
-
+        const obstacle = this.obstacles.create(x, -50, "obstacle")
+            .setVelocityY(100)
+            .setImmovable(true)
+            .setName(`obstacle_${Date.now()}`);
     }
 
-    private generateNpc() {
+    private generateNPC() {
         const x = Phaser.Math.Between(50, this.cameras.main.width - 50);
-        const npc = this.npcs.create(x, -50, "npc").setDisplaySize(80, 100);
-        npc.setVelocityY(80);
-        npc.setImmovable(true);
+        const npc = this.npcs.create(x, -50, "npc")
+            .setVelocityY(80)
+            .setImmovable(true)
+            .setName(`npc_${Date.now()}`);
     }
 
-    private handleNpcCollision(car: Phaser.Physics.Arcade.Sprite, npc: Phaser.Physics.Arcade.Sprite) {
-        if (!car || !npc) return;
+    private handleObstacleOverlap(car: Phaser.Physics.Arcade.Sprite, obstacle: Phaser.Physics.Arcade.Sprite) {
+        if (this.isSlowed) return;
 
-        this.carSpeed = this.slowSpeed;
+        // Efeitos visuais
+        this.cameras.main.shake(100, 0.01);
+        obstacle.setAlpha(0.6); // Obstáculo fica semi-transparente
 
+        // Reduz a velocidade
+        this.currentSpeed = this.slowSpeed;
+        this.isSlowed = true;
+
+        // Envia a colisão para o servidor
+        if (this.socket.connected) {
+            this.socket.emit("collisionReport", {
+                playerId: this.playerId,
+                objectId: obstacle.name,
+                type: "obstacle"
+            });
+        }
+
+        // Recupera a velocidade após o tempo definido
         this.time.delayedCall(this.slowDuration, () => {
-            this.carSpeed = this.normalSpeed;
+            this.currentSpeed = this.normalSpeed;
+            this.isSlowed = false;
+            obstacle.setAlpha(1); // Volta a opacidade normal
         });
     }
 
-
-    private handleCollision(car: Phaser.Physics.Arcade.Sprite, obstacle: Phaser.Physics.Arcade.Sprite) {
-        if (!car || !obstacle) return;
-
+    private handleNpcCollision(car: Phaser.Physics.Arcade.Sprite, npc: Phaser.Physics.Arcade.Sprite) {
+        // Game over ao colidir com NPC
         this.cameras.main.shake(300, 0.02);
-
-        // Pausar a cena
         this.scene.pause();
+        this.showGameOver();
 
-        // Exibir mensagem de fim de jogo
-        this.add.text(this.cameras.main.width / 2, this.cameras.main.height / 2, "Fim de Jogo!", {
-            fontSize: "32px",
-            color: "#fff",
-        }).setOrigin(0.5);
-    }
-
-    moveCar() {
-        if (!this.cursors) return;
-
-        if (this.cursors.left.isDown) {
-            this.car.setVelocityX(-this.carSpeed);
-        } else if (this.cursors.right.isDown) {
-            this.car.setVelocityX(this.carSpeed);
-        } else {
-            this.car.setVelocityX(0);
+        if (this.socket.connected) {
+            this.socket.emit("collisionReport", {
+                playerId: this.playerId,
+                objectId: npc.name,
+                type: "npc"
+            });
         }
     }
 
-    private raceFinished() {
-        this.physics.pause(); // Pausa a física do jogo
-        this.car.setTint(0x00ff00); // Destaca o carro do player
-
+    private showGameOver() {
         this.add.text(
             this.cameras.main.width / 2,
             this.cameras.main.height / 2,
-            'CORRIDA CONCLUÍDA!',
+            "Fim de Jogo!",
             {
-                fontSize: '48px',
-                color: '#ffffff',
-                backgroundColor: '#000000'
+                fontSize: "32px",
+                color: "#fff",
+                backgroundColor: "#000"
             }
         ).setOrigin(0.5);
     }
 
-    update() {
-        this.background.tilePositionY -= 4;
-        this.moveCar();
+    private raceFinished() {
+        this.physics.pause();
+        this.car.setTint(0x00ff00);
 
-        this.obstacles.getChildren().forEach(obstacle => {
-            const sprite = obstacle as Phaser.Physics.Arcade.Sprite;
-            if (sprite.y > this.cameras.main.height) {
-                sprite.destroy();
-            }
-        });
+        this.add.text(
+            this.cameras.main.width / 2,
+            this.cameras.main.height / 2,
+            "CORRIDA CONCLUÍDA!",
+            { fontSize: "32px", color: "#fff", backgroundColor: "#000" }
+        ).setOrigin(0.5);
+    }
 
-        this.npcs.getChildren().forEach(npc => {
-            const sprite = npc as Phaser.Physics.Arcade.Sprite;
-            if (sprite.y > this.cameras.main.height) {
-                sprite.destroy();
-            }
-        });
+    update(time: number) {
+        // Atualiza o fundo
+        this.background.tilePositionY -= 2;
 
-        if (this.car.y < (this.finishLine.body as Phaser.Physics.Arcade.StaticBody).y + 20) {
+        // Controla o carro com a velocidade atual
+        if (this.cursors.left?.isDown) {
+            this.car.setVelocityX(-this.currentSpeed);
+        } else if (this.cursors.right?.isDown) {
+            this.car.setVelocityX(this.currentSpeed);
+        } else {
+            this.car.setVelocityX(0);
+        }
+
+        // Limpa objetos fora da tela
+        this.cleanupObjects();
+
+        // Verifica se a corrida terminou
+        if (this.car.y < this.finishLine.y + 20) {
             this.raceFinished();
         }
 
+        // Envia atualização de posição periodicamente
+        if (time - this.lastUpdate > 100 && this.socket.connected) {
+            this.lastUpdate = time;
+            this.socket.emit("playerUpdate", {
+                x: this.car.x,
+                y: this.car.y,
+                speed: this.currentSpeed
+            });
+        }
+    }
 
+    private cleanupObjects() {
+        [this.obstacles, this.npcs].forEach(group => {
+            group.getChildren().forEach(obj => {
+                const sprite = obj as Phaser.Physics.Arcade.Sprite;
+                if (sprite.y > this.cameras.main.height) {
+                    sprite.destroy();
+                }
+            });
+        });
     }
 }
 
