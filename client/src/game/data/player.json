@@ -1,0 +1,83 @@
+[
+    {
+        "level": 1,
+        "name": "White",
+        "xp": 2,
+        "weapons": [
+            {
+                "sprite": "shuriken",
+                "moveTo": true
+            },
+            {
+                "sprite": "bomb",
+                "moveTo": false
+            }
+        ]
+    },
+    {
+        "level": 2,
+        "name": "White",
+        "xp": 1,
+        "weapons": [
+            {
+                "sprite": "shuriken",
+                "moveTo": true
+            }
+        ]
+    },
+    {
+        "level": 3,
+        "name": "White",
+        "xp": 1,
+        "weapons": [
+            {
+                "sprite": "shuriken",
+                "moveTo": true
+            }
+        ]
+    },
+    {
+        "level": 4,
+        "name": "White",
+        "xp": 1,
+        "weapons": [
+            {
+                "sprite": "shuriken",
+                "moveTo": true
+            }
+        ]
+    },
+    {
+        "level": 5,
+        "name": "White",
+        "xp": 1,
+        "weapons": [
+            {
+                "sprite": "shuriken",
+                "moveTo": true
+            }
+        ]
+    },
+    {
+        "level": 6,
+        "name": "White",
+        "xp": 1,
+        "weapons": [
+            {
+                "sprite": "shuriken",
+                "moveTo": true
+            }
+        ]
+    },
+    {
+        "level": 7,
+        "name": "White",
+        "xp": 1,
+        "weapons": [
+            {
+                "sprite": "shuriken",
+                "moveTo": true
+            }
+        ]
+    }
+]
