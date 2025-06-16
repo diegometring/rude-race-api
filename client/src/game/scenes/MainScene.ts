@@ -276,41 +276,24 @@ class MainScene extends Phaser.Scene {
             backgroundScrollSpeed: this.normalBackgroundSpeed,
             duration: tweenDuration,
             delay: tweenDelay,
-            ease: 'Sine.InOut'
+            ease: 'Sine.In'
         });
 
-        // // Tweens para os obstáculos e NPCs
-        // this.obstacles.getChildren().forEach(obj => {
-        //     const spriteBody = (obj as Phaser.Physics.Arcade.Sprite).body;
-        //     if (spriteBody) {
-        //         this.tweens.add({
-        //             targets: spriteBody.velocity,
-        //             y: this.normalObstacleSpeed,
-        //             duration: tweenDuration,
-        //             delay: tweenDelay,
-        //             ease: 'Sine.InOut'
-        //         });
-        //     }
-        // });
-
-        this.tweens.add({
-            targets: (this.npcs.getChildren().map(c => (c as Vehicle).body.velocity)),
-            y: this.normalNpcSpeed,
-            duration: tweenDuration,
-            delay: tweenDelay,
-            ease: 'Sine.InOut',
-            onComplete: onSlowdownComplete // Chama a função de reset no final
+        // Tweens para os obstáculos e NPCs
+        this.obstacles.getChildren().map(obj => {
+            const spriteBody = (obj as Phaser.Physics.Arcade.Sprite).body;
+            if (spriteBody) {
+                this.tweens.add({
+                    targets: spriteBody.velocity,
+                    y: this.normalObstacleSpeed,
+                    duration: tweenDuration,
+                    delay: tweenDelay,
+                    ease: 'Sine.In',
+                    onComplete: onSlowdownComplete
+                });
+            }
         });
-
-        this.tweens.add({
-            targets: this.obstacles.getChildren().map(c => (c as Phaser.Physics.Arcade.Sprite).body),
-            y: this.normalObstacleSpeed,
-            duration: tweenDuration,
-            delay: tweenDelay,
-            ease: 'Sine.InOut',
-            onComplete: onSlowdownComplete // Chama a função de reset no final
-        });
-
+        
     }
 
     // Método para colisão com NPC
