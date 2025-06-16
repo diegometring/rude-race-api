@@ -1,13 +1,55 @@
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+.app-container, .login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100vw;
+  height: 100vh;
+  background-color: #282c34;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+#game-container canvas {
+  border-radius: 8px;
+}
+
+.login-form {
+  font-family: Arial, sans-serif;
+  color: white;
+  text-align: center;
+  padding: 30px 40px;
+  background-color: rgba(0, 0, 0, 0.7);
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+}
+
+.login-form h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
+.login-form input {
+  padding: 12px;
+  font-size: 16px;
+  border: 2px solid #555;
+  border-radius: 5px;
+  background-color: #444;
+  color: white;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 20px;
+}
+
+.login-form button {
+  padding: 12px 25px;
+  font-size: 18px;
+  color: white;
+  background-color: #61dafb;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  width: 100%;
+  transition: background-color 0.3s;
+}
+
+.login-form button:hover {
+  background-color: #21a1f1;
 }
