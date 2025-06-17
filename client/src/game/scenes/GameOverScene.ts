@@ -5,8 +5,24 @@ class GameOverScene extends Phaser.Scene {
         super({ key: 'GameOverScene' });
     }
 
-    create() {
-        //this.add.text(400, 300, 'Game Over', { fontSize: '32px', fill: '#fff' }).setOrigin(0.5);
+    create(data: { username: string }) {
+        const { width, height } = this.cameras.main;
+        this.add.text(width / 2, height / 2 - 50, 'GAME OVER', { 
+            fontSize: '64px', 
+            color: '#ff0000' 
+        }).setOrigin(0.5);
+
+        const restartButton = this.add.text(width / 2, height / 2 + 50, 'Tentar Novamente', {
+            fontSize: '32px',
+            color: '#ffffff',
+            backgroundColor: '#555555',
+            padding: { x: 20, y: 10 }
+        }).setOrigin(0.5).setInteractive();
+
+        restartButton.on('pointerdown', () => {
+            // Reinicia a MainScene, passando o nome de usuário novamente
+            this.scene.start('MainScene', { username: data.username });
+        });
     }
 }
 

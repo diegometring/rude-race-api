@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import PreloadScene from "./scenes/PreloadScene";
 import MainScene from "./scenes/MainScene";
 import GameOverScene from "./scenes/GameOverScene";
+import RaceFinishedScene from "./scenes/RaceFinishedScene";
 
 const GameConfig: Phaser.Types.Core.GameConfig = {
     type: Phaser.AUTO,
@@ -17,7 +18,7 @@ const GameConfig: Phaser.Types.Core.GameConfig = {
         }
     },
     pixelArt: true,
-    scene: [PreloadScene, MainScene, GameOverScene]
+    scene: [PreloadScene, MainScene, GameOverScene, RaceFinishedScene]
 };
 
 export default GameConfig;

@@ -22,7 +22,6 @@ class MainScene extends Phaser.Scene {
 
     private obstacles!: Phaser.Physics.Arcade.Group;
     private npcs!: Phaser.Physics.Arcade.Group;
-    private finishLine!: Phaser.Physics.Arcade.Sprite;
     private barriers!: Phaser.Physics.Arcade.StaticGroup;
     private playerId: string = '';
     private username: string = 'Jogador Anônimo';
@@ -45,6 +44,18 @@ class MainScene extends Phaser.Scene {
 
     private lastUpdate: number = 0;
 
+    // Propriedades para a lógica da corrida
+    private raceDistance: number = 10000; // Distância total da corrida em "unidades"
+    private raceStarted: boolean = false;
+    private raceStartTime: number = 0;
+    private startLine!: Phaser.GameObjects.Sprite;
+    private finishLine!: Phaser.GameObjects.Sprite;
+
+    // Propriedades da barra de vida
+    private playerHealth: number = 100;
+    private hpBarBg!: Phaser.GameObjects.Image;
+    private hpBarFill!: Phaser.GameObjects.Image;
+
     private obstacleTypes: ObstacleData[] = [
         { key: 'obstacle1', asset: 'assets/Obstacle/1.png', width: 107, height: 133 },
         { key: 'obstacle2', asset: 'assets/Obstacle/2.png', width: 104, height: 96 },
@@ -58,26 +69,24 @@ class MainScene extends Phaser.Scene {
 
     constructor() {
         super({ key: "MainScene" });
-    }
 
-    preload() {
-        this.load.image("background", "assets/RoadTile/01/1.png");
-        this.load.image("car", "assets/Motorcycle Body/1.png");
-        this.load.image("rider", "assets/Riders/01/Riders01.png");
-        this.load.image("finish_line", "assets/line.png");
-
-        this.obstacleTypes.forEach(obs => {
-            this.load.image(obs.key, obs.asset);
-        });
-
+        // Isso garante que o array NUNCA estará vazio quando generateNPC for chamado.
         for (let i = 2; i <= 8; i++) {
             const bodyKey = `npcBody${i}`;
             const riderKey = `npcRider${i}`;
             this.npcAssetKeys.push({ bodyKey, riderKey });
-            this.load.image(bodyKey, `assets/Motorcycle Body/${i}.png`);
-            this.load.image(riderKey, `assets/Riders/0${i}/Riders0${i}.png`); 
         }
 
+    }
+
+    preload() {
+        this.obstacleTypes.forEach(obs => {
+            this.load.image(obs.key, obs.asset);
+        });
+        this.npcAssetKeys.forEach(assets => {
+            this.load.image(assets.bodyKey, `assets/Motorcycle Body/${assets.bodyKey.slice(-1)}.png`);
+            this.load.image(assets.riderKey, `assets/Riders/0${assets.riderKey.slice(-1)}/Riders0${assets.riderKey.slice(-1)}.png`);
+        });
     }
 
     create() {
@@ -91,25 +100,30 @@ class MainScene extends Phaser.Scene {
             this.playerId = this.socket.id;
         });
 
+        // Config da câmera
         const { width, height } = this.cameras.main;
         this.background = this.add.tileSprite(width / 2, height / 2, 1026, 1798, "background");
 
+        //Linha de partida e chegada
+        this.finishLine = this.physics.add.sprite(width / 2, -this.raceDistance, "finish_line").setOrigin(0.5, 0);
+        this.startLine = this.add.sprite(width / 2, height - 173, "start_line").setOrigin(0.5, 0);
+
+        // Veículo do jogador
         const playerMotorcycle = this.add.sprite(0, 0, 'car');
         const playerRider = this.add.sprite(0, -20, 'rider');
         this.playerVehicle = this.add.container(width / 2, height - 100, [playerMotorcycle, playerRider]) as Vehicle;
-    
         this.physics.world.enable(this.playerVehicle);
         this.playerVehicle.body.setSize(40, 80);
         this.playerVehicle.body.setCollideWorldBounds(true);
 
-        this.finishLine = this.physics.add.sprite(width / 2, 50, "finish_line")
-            .setDisplaySize(width, 10)
-            .setImmovable(true);
-            
+        // Barra de vida
+        this.hpBarBg = this.add.image(20, 20, 'hp_bar_bg').setOrigin(0, 0).setScrollFactor(0);
+        this.hpBarFill = this.add.image(this.hpBarBg.x + 55, this.hpBarBg.y + 3, 'hp_bar_fill').setOrigin(0, 0).setScrollFactor(0);
+        
+        // Setup de objetos
         this.setupBarriers(width, height);
         this.setupObstacles();
         this.setupNPCs();
-
         this.cursors = this.input.keyboard?.createCursorKeys() || {} as Phaser.Types.Input.Keyboard.CursorKeys;
     }
 
@@ -135,10 +149,10 @@ class MainScene extends Phaser.Scene {
     // Prepara e cria os NPCs
     private setupNPCs() {
         this.npcs = this.physics.add.group();
-        this.physics.add.collider(this.playerVehicle, this.npcs, (vehicle, npc) => {
+        this.physics.add.collider(this.playerVehicle, this.npcs, (playerVehicle, npc) => {
             this.handleNpcCollision(
-                vehicle as Phaser.Physics.Arcade.Sprite,
-                npc as Phaser.Physics.Arcade.Sprite
+                playerVehicle as Vehicle,
+                npc as Vehicle
             );
         });
         this.time.addEvent({ delay: 4000, callback: this.generateNPC, callbackScope: this, loop: true });
@@ -165,8 +179,8 @@ class MainScene extends Phaser.Scene {
                 if (distance < this.safeDistance) isSafe = false;
             });
 
-                        if (isSafe) {
-                // NOVO: Escolhe um tipo de obstáculo aleatório
+            if (isSafe) {
+                // Escolhe um tipo de obstáculo aleatório
                 const randomObstacleData = Phaser.Math.RND.pick(this.obstacleTypes);
                 const ySpeed = this.isSlowed ? this.slowObstacleSpeed : this.normalObstacleSpeed;
 
@@ -239,6 +253,19 @@ class MainScene extends Phaser.Scene {
         if (this.isSlowed) return;
 
         this.isSlowed = true;
+
+        // Reduz a vida do jogador
+        this.playerHealth -= 25; // ou qualquer outro valor
+        this.updateHpBar();
+
+        // Remove o obstáculo para não causar dano múltiplo
+        obstacle.destroy();
+
+        if (this.playerHealth <= 0) {
+            this.scene.start('GameOverScene', { username: this.username });
+            return;
+        }
+
         this.cameras.main.shake(100, 0.01);
         (playerVehicle.list[0] as Phaser.GameObjects.Sprite).setAlpha(0.6); // Deixa a moto transparente
         (playerVehicle.list[1] as Phaser.GameObjects.Sprite).setAlpha(0.6); // Deixa o piloto transparente
@@ -279,7 +306,7 @@ class MainScene extends Phaser.Scene {
             ease: 'Sine.In'
         });
 
-        // Tweens para os obstáculos e NPCs
+        // Tweens para os obstáculos
         this.obstacles.getChildren().map(obj => {
             const spriteBody = (obj as Phaser.Physics.Arcade.Sprite).body;
             if (spriteBody) {
@@ -294,31 +321,53 @@ class MainScene extends Phaser.Scene {
             }
         });
         
+        // Tweens para os NPCs
+        this.npcs.getChildren().map(obj => {
+            const vehicleBody = (obj as Vehicle).body;
+            if (vehicleBody) {
+                this.tweens.add({
+                    targets: vehicleBody.velocity,
+                    y: this.normalNpcSpeed,
+                    duration: tweenDuration,
+                    delay: tweenDelay,
+                    ease: 'Sine.In',
+                    onComplete: onSlowdownComplete
+                });
+            }
+        });
+    }
+
+    private updateHpBar() {
+        const percentage = this.playerHealth / 100;
+        this.hpBarFill.setDisplaySize(270 * percentage, 33);
     }
 
     // Método para colisão com NPC
-    private handleNpcCollision(car: Phaser.Physics.Arcade.Sprite, npc: Phaser.Physics.Arcade.Sprite) {
+    handleNpcCollision(_playerVehicle: Vehicle, npc: Vehicle) {
         this.cameras.main.shake(300, 0.02);
-        this.scene.pause();
-        this.showGameOver();
+        this.scene.start('GameOverScene', { username: this.username });
 
         if (this.socket.connected) {
             this.socket.emit("collisionReport", { playerId: this.playerId, objectId: npc.name, type: "npc" });
         }
     }
 
-    private showGameOver() {
-        this.add.text(this.cameras.main.width / 2, this.cameras.main.height / 2, "Fim de Jogo!", { fontSize: "32px", color: "#fff", backgroundColor: "#000" }).setOrigin(0.5);
-    }
+    update(time: number, delta: number) {
+        // Inicia o cronômetro quando o jogador inicia o movimento
+        if (!this.raceStarted && (this.playerVehicle.body.velocity.x !== 0 || this.playerVehicle.body.velocity.y !== 0)) {
+            this.raceStarted = true;
+            this.raceStartTime = time;
+        }
 
-    private raceFinished() {
-        this.physics.pause();
-        this.playerVehicle.list.forEach(go => (go as Phaser.GameObjects.Sprite).setTint(0x00ff00));
-        this.add.text(this.cameras.main.width / 2, this.cameras.main.height / 2, "CORRIDA CONCLUÍDA!", { fontSize: "32px", color: "#fff", backgroundColor: "#000" }).setOrigin(0.5);
-    }
+        // A velocidade do mundo agora depende se a corrida acabou
+        if (this.raceDistance > 0) {
+            const speed = this.backgroundScrollSpeed * (delta / 16.67); // Ajuste de velocidade por delta time
+            this.background.tilePositionY -= speed;
+            this.finishLine.y += speed; // Sincroniza a linha de chegada
+            this.raceDistance -= speed;
+        }
 
-    update(time: number) {
-        this.background.tilePositionY -= this.backgroundScrollSpeed;
+        // this.background.tilePositionY -= this.backgroundScrollSpeed;
 
         if (this.cursors.left?.isDown) {
             this.playerVehicle.body.setVelocityX(-this.playerSpeedX);
@@ -330,10 +379,6 @@ class MainScene extends Phaser.Scene {
 
         this.cleanupObjects();
 
-        if (!this.scene.isPaused('MainScene') && this.playerVehicle.y < this.finishLine.y + 20) {
-            this.raceFinished();
-        }
-
         if (time - this.lastUpdate > 100 && this.socket.connected) {
             this.lastUpdate = time;
             this.socket.emit("playerUpdate", {
@@ -344,6 +389,16 @@ class MainScene extends Phaser.Scene {
                 isSlowed: this.isSlowed 
             });
         }
+
+        // Verifica se cruzou a linha de chegada
+        if (this.playerVehicle.y < this.finishLine.y + this.finishLine.height) {
+            const raceTotalTime = (time - this.raceStartTime) / 1000; // Tempo em segundos
+            this.scene.start('RaceFinishedScene', { 
+                username: this.username, 
+                time: raceTotalTime 
+            });
+        }
+
     }
 
     private cleanupObjects() {
