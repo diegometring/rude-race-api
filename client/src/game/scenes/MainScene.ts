@@ -14,6 +14,7 @@ class MainScene extends Phaser.Scene {
     private socket!: SocketIOClient.Socket;
     private background!: Phaser.GameObjects.TileSprite;
     private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+    private isWaitingForServer: boolean = false;
 
     private playerVehicle!: Vehicle;
 
@@ -45,7 +46,7 @@ class MainScene extends Phaser.Scene {
     private slowObstacleSpeed: number = this.slowBackgroundSpeed * 60;
 
     private normalNpcSpeed: number = (this.normalBackgroundSpeed - 2) * 60;
-    private boostedNpcSpeed: number = -80; 
+    private boostedNpcSpeed: number = -80;
 
     private backgroundScrollSpeed: number = this.normalBackgroundSpeed;
 
@@ -86,7 +87,7 @@ class MainScene extends Phaser.Scene {
 
     // O preload deve ficar em uma cena separada (PreloadScene)
     // Se você o tiver aqui, não tem problema, mas é uma boa prática separá-lo.
-    preload() {}
+    preload() { }
 
     create() {
         // Reset de estado para múltiplos jogos
@@ -95,6 +96,8 @@ class MainScene extends Phaser.Scene {
         this.isFinishSequenceActive = false;
         this.finalTimeRecorded = false;
         this.backgroundScrollSpeed = this.normalBackgroundSpeed;
+        this.raceDistance = 5000;
+        this.playerHealth = 100;
 
         this.username = this.registry.get('username') || 'Jogador Anônimo';
         this.socket = io("http://localhost:3001");
@@ -102,6 +105,40 @@ class MainScene extends Phaser.Scene {
             console.log(`Conectado ao servidor como ${this.username} (ID: ${this.socket.id})`);
             this.playerId = this.socket.id;
         });
+
+        // NOVO: Listener para o resultado da colisão vindo do servidor
+        this.socket.on('collisionResult', (data: { outcome: string, objectId: string, damage?: number }) => {
+            this.isWaitingForServer = false; // Libera para reportar novas colisões
+
+            const { outcome, objectId, damage } = data;
+            console.log(`Servidor validou colisão com ${objectId}. Resultado: ${outcome}`);
+
+            // Encontra o objeto na cena para poder destruí-lo se necessário
+            const collidedObject = this.obstacles.getChildren().find(o => o.name === objectId) ||
+                this.npcs.getChildren().find(n => n.name === objectId);
+
+            switch (outcome) {
+                case 'slowdown':
+                    if (collidedObject) {
+                        collidedObject.destroy();
+                    }
+                    if (damage) {
+                        this.playerHealth -= damage;
+                        this.updateHpBar();
+                    }
+                    if (this.playerHealth <= 0) {
+                        this.triggerGameOver();
+                    } else {
+                        this.applySlowdownEffect();
+                    }
+                    break;
+                case 'gameOver':
+                    this.triggerGameOver(collidedObject as Vehicle);
+                    break;
+                // Adicione outros casos se necessário
+            }
+        });
+
 
         const { width, height } = this.cameras.main;
         this.background = this.add.tileSprite(width / 2, height / 2, 1026, 1798, "background");
@@ -112,18 +149,24 @@ class MainScene extends Phaser.Scene {
         const playerMotorcycle = this.add.sprite(0, 0, 'car');
         const playerRider = this.add.sprite(0, -20, 'rider');
         this.playerVehicle = this.add.container(width / 2, height - 100, [playerMotorcycle, playerRider]) as Vehicle;
+
+        (this.playerVehicle.list[0] as Phaser.GameObjects.Sprite).setAlpha(1);
+        (this.playerVehicle.list[1] as Phaser.GameObjects.Sprite).setAlpha(1);
+
         this.physics.world.enable(this.playerVehicle);
         this.playerVehicle.body.setSize(40, 80);
         this.playerVehicle.body.setCollideWorldBounds(true);
 
         this.hpBarBg = this.add.image(20, 20, 'hp_bar_bg').setOrigin(0, 0).setScrollFactor(0).setDepth(100);
         this.hpBarFill = this.add.image(this.hpBarBg.x + 55, this.hpBarBg.y + 3, 'hp_bar_fill').setOrigin(0, 0).setScrollFactor(0).setDepth(100);
-        
+        this.updateHpBar();
+
         this.setupBarriers(width, height);
         this.setupObstacles();
         this.setupNPCs();
         this.cursors = this.input.keyboard?.createCursorKeys() || {} as Phaser.Types.Input.Keyboard.CursorKeys;
     }
+
 
     private setupBarriers(width: number, height: number) {
         this.barriers = this.physics.add.staticGroup();
@@ -187,7 +230,7 @@ class MainScene extends Phaser.Scene {
             const potentialX = Phaser.Math.Between(100, this.cameras.main.width - 100);
             const potentialY = -50;
             let isSafe = true;
-            
+
             this.npcs.getChildren().forEach(obj => {
                 const distance = Phaser.Math.Distance.Between(potentialX, potentialY, (obj as Vehicle).x, (obj as Vehicle).y);
                 if (distance < this.safeDistance) isSafe = false;
@@ -204,7 +247,7 @@ class MainScene extends Phaser.Scene {
                 const npcMotorcycle = this.add.sprite(0, 0, randomNpcAssets.bodyKey);
                 const npcRider = this.add.sprite(0, -20, randomNpcAssets.riderKey);
                 const npcVehicle = this.add.container(potentialX, potentialY, [npcMotorcycle, npcRider]) as Vehicle;
-                
+
                 this.npcs.add(npcVehicle);
                 this.physics.world.enable(npcVehicle);
                 npcVehicle.body.setSize(40, 80);
@@ -215,55 +258,53 @@ class MainScene extends Phaser.Scene {
         }
     }
 
-    private handleObstacleOverlap(playerVehicle: Vehicle, obstacle: Phaser.Physics.Arcade.Sprite) {
+    // NOVO: Função centralizada para aplicar o efeito de lentidão
+    private applySlowdownEffect() {
         if (this.isSlowed) return;
-
-        this.playerHealth -= 25;
-        this.updateHpBar();
-        obstacle.destroy();
-
-        if (this.playerHealth <= 0) {
-            this.scene.start('GameOverScene', { username: this.username });
-            return;
-        }
-
         this.isSlowed = true;
-        this.cameras.main.shake(100, 0.01);
-        (playerVehicle.list[0] as Phaser.GameObjects.Sprite).setAlpha(0.6);
-        (playerVehicle.list[1] as Phaser.GameObjects.Sprite).setAlpha(0.6);
 
+        // 1. Aplica os efeitos imediatos
+        this.cameras.main.shake(100, 0.01);
+        (this.playerVehicle.list[0] as Phaser.GameObjects.Sprite).setAlpha(0.6);
+        (this.playerVehicle.list[1] as Phaser.GameObjects.Sprite).setAlpha(0.6);
         this.backgroundScrollSpeed = this.slowBackgroundSpeed;
+
+        // Atualiza a velocidade dos objetos existentes
         this.obstacles.getChildren().forEach(obj => (obj as Phaser.Physics.Arcade.Sprite).setVelocityY(this.slowObstacleSpeed));
         this.npcs.getChildren().forEach(obj => (obj as Vehicle).body.setVelocityY(this.boostedNpcSpeed));
-        
-        if (this.socket.connected) { /* ... */ }
 
-        const tweenDuration = this.slowDuration * 0.75;
-        const tweenDelay = this.slowDuration * 0.25;
-
+        // 2. Define a função que REVERTE TUDO
         const onSlowdownComplete = () => {
-            if (!this.isSlowed) return;
+            if (!this.scene.isActive()) return; // Não faz nada se a cena já mudou
+
             this.isSlowed = false;
-            (playerVehicle.list[0] as Phaser.GameObjects.Sprite).setAlpha(1);
-            (playerVehicle.list[1] as Phaser.GameObjects.Sprite).setAlpha(1);
-            
-            this.obstacles.getChildren().forEach(obj => (obj as Phaser.Physics.Arcade.Sprite).setVelocityY(this.normalObstacleSpeed));
-            this.npcs.getChildren().forEach(obj => (obj as Vehicle).body.setVelocityY(this.normalNpcSpeed));
-        };
+            (this.playerVehicle.list[0] as Phaser.GameObjects.Sprite).setAlpha(1);
+            (this.playerVehicle.list[1] as Phaser.GameObjects.Sprite).setAlpha(1);
 
-        this.tweens.add({ targets: this, backgroundScrollSpeed: this.normalBackgroundSpeed, duration: tweenDuration, delay: tweenDelay, ease: 'Sine.In' });
+            // As animações abaixo garantem que a velocidade volte ao normal gradualmente
+            const tweenDuration = this.slowDuration * 0.75;
 
-        this.obstacles.getChildren().forEach(obj => {
-            if ((obj as Phaser.Physics.Arcade.Sprite).body) {
-                this.tweens.add({ targets: (obj as Phaser.Physics.Arcade.Sprite).body!.velocity, y: this.normalObstacleSpeed, duration: tweenDuration, delay: tweenDelay, ease: 'Sine.In' });
-            }
-        });
-        
-        this.npcs.getChildren().forEach(obj => {
-            if ((obj as Vehicle).body) {
-                this.tweens.add({ targets: (obj as Vehicle).body.velocity, y: this.normalNpcSpeed, duration: tweenDuration, delay: tweenDelay, ease: 'Sine.In', onComplete: onSlowdownComplete });
-            }
-        });
+            // Anima a velocidade do fundo de volta ao normal
+            this.tweens.add({
+                targets: this,
+                backgroundScrollSpeed: this.normalBackgroundSpeed,
+                duration: tweenDuration,
+                ease: 'Sine.In'
+            });
+
+            // Anima a velocidade dos objetos existentes de volta ao normal
+            this.obstacles.getChildren().forEach(obj => {
+                const body = (obj as Phaser.Physics.Arcade.Sprite).body;
+                if (body && body.velocity) {
+                    this.tweens.add({ targets: body.velocity, y: this.normalObstacleSpeed, duration: tweenDuration, ease: 'Sine.In' });
+                }
+            });
+            this.npcs.getChildren().forEach(obj => {
+                if ((obj as Vehicle).body) {
+                    this.tweens.add({ targets: (obj as Vehicle).body.velocity, y: this.normalNpcSpeed, duration: tweenDuration, ease: 'Sine.In' });
+                }
+            });
+        }
     }
 
     private updateHpBar() {
@@ -271,12 +312,74 @@ class MainScene extends Phaser.Scene {
         this.hpBarFill.setDisplaySize(270 * percentage, 33);
     }
 
-    handleNpcCollision(_playerVehicle: Vehicle, npc: Vehicle) {
+    // NOVO: Função centralizada para o Game Over
+    private triggerGameOver(collidedNpc?: Vehicle) {
         this.cameras.main.shake(300, 0.02);
         this.scene.start('GameOverScene', { username: this.username });
-        if (this.socket.connected) {
-            this.socket.emit("collisionReport", { playerId: this.playerId, username: this.username, objectId: npc.name, type: "npc" });
+
+        // Apenas para o log no servidor, o estado do jogo já foi alterado
+        if (this.socket.connected && collidedNpc) {
+            this.socket.emit("gameOverNotification", {
+                playerId: this.playerId,
+                username: this.username,
+                objectId: collidedNpc.name
+            });
         }
+    }
+
+    private handleObstacleOverlap(playerVehicle: Vehicle, obstacle: Phaser.Physics.Arcade.Sprite) {
+        if (this.isWaitingForServer || obstacle.getData('hit')) return;
+        obstacle.setData('hit', true); // Marca o obstáculo para não reportar de novo
+        this.isWaitingForServer = true; // Bloqueia novos reports até o servidor responder
+        const bounds = obstacle.getBounds();
+        const collisionData = {
+            playerId: this.playerId,
+            objectId: obstacle.name,
+            type: 'obstacle',
+            player: {
+                x: playerVehicle.x,
+                y: playerVehicle.y,
+                width: playerVehicle.body.width,
+                height: playerVehicle.body.height,
+            },
+            object: {
+                x: obstacle.x,
+                y: obstacle.y,
+                width: bounds.width,
+                height: bounds.height,
+            }
+        };
+        this.socket.emit("collisionReport", collisionData);
+        obstacle.setVisible(false);
+    }
+
+    handleNpcCollision(_playerVehicle: Vehicle, npc: Vehicle) {
+        if (this.isWaitingForServer || npc.getData('hit')) return;
+
+        npc.setData('hit', true);
+        this.isWaitingForServer = true;
+
+        const bounds = (npc.list[0] as Phaser.GameObjects.Sprite).getBounds();
+
+        const collisionData = {
+            playerId: this.playerId,
+            objectId: npc.name,
+            type: 'npc',
+            player: {
+                x: _playerVehicle.x,
+                y: _playerVehicle.y,
+                width: _playerVehicle.body.width,
+                height: _playerVehicle.body.height,
+            },
+            object: {
+                x: npc.x,
+                y: npc.y,
+                width: npc.body.width,
+                height: npc.body.height,
+            }
+        };
+
+        this.socket.emit("collisionReport", collisionData);
     }
 
     private startFinishSequence() {
@@ -308,7 +411,7 @@ class MainScene extends Phaser.Scene {
         }
 
         if (this.raceStarted) {
-        // --- LÓGICA DE MOVIMENTO DO MUNDO (ANTES DA SEQUÊNCIA FINAL) ---
+            // --- LÓGICA DE MOVIMENTO DO MUNDO (ANTES DA SEQUÊNCIA FINAL) ---
             if (!this.isFinishSequenceActive) {
                 if (this.raceDistance > 0) {
                     const speed = this.backgroundScrollSpeed * (delta / 16.67);
@@ -332,12 +435,12 @@ class MainScene extends Phaser.Scene {
                     this.finalTimeRecorded = true;
                     this.finalTime = (time - this.raceStartTime) / 1000;
                 }
-            
+
                 // 6. Verifica se o jogador saiu da tela para MUDAR DE CENA
                 if (this.playerVehicle.y < -this.playerVehicle.height) {
-                    this.scene.start('RaceFinishedScene', { 
-                        username: this.username, 
-                        time: this.finalTime 
+                    this.scene.start('RaceFinishedScene', {
+                        username: this.username,
+                        time: this.finalTime
                     });
                 }
             }
@@ -352,16 +455,16 @@ class MainScene extends Phaser.Scene {
                 username: this.username,
                 x: this.playerVehicle.x,
                 y: this.playerVehicle.y,
-                isSlowed: this.isSlowed 
+                isSlowed: this.isSlowed
             });
         }
 
         // Verifica se cruzou a linha de chegada
         if (this.playerVehicle.y < this.finishLine.y + this.finishLine.height) {
             const raceTotalTime = (time - this.raceStartTime) / 1000; // Tempo em segundos
-            this.scene.start('RaceFinishedScene', { 
-                username: this.username, 
-                time: raceTotalTime 
+            this.scene.start('RaceFinishedScene', {
+                username: this.username,
+                time: raceTotalTime
             });
         }
 

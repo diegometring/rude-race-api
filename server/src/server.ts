@@ -20,14 +20,15 @@ interface GameObject {
 
 interface GameState {
   players: Record<string, GameObject>;
-  enemies: Record<string, GameObject>;
+  dynamicObjects: Record<string, GameObject>;
 }
 
 interface CollisionData {
   playerId: string;
-  enemyId: string;
-  player: GameObject; // This is obj1 in checkAABBCollision
-  enemy: GameObject;  // This is obj2 in checkAABBCollision
+  objectId: string;
+  type: 'npc' | 'obstacle';
+  player: GameObject;
+  object: GameObject;
 }
 
 const httpServer = createServer(app);
@@ -41,7 +42,7 @@ const io = new Server(httpServer, {
 
 const gameState: GameState = {
   players: {},
-  enemies: {}
+  dynamicObjects: {}
 };
 
 io.on('connection', (socket: Socket) => {
@@ -80,7 +81,7 @@ io.on('connection', (socket: Socket) => {
       };
 
       // Log da posição do jogador no servidor
-      console.log(`[playerUpdate] Jogador ${socket.id} atualizou posição: X=${gameState.players[socket.id].x}, Y=${gameState.players[socket.id].y}`);
+      //console.log(`[playerUpdate] Jogador ${socket.id} atualizou posição: X=${gameState.players[socket.id].x}, Y=${gameState.players[socket.id].y}`);
 
       // Envia atualização para outros jogadores
       socket.broadcast.emit('playerMoved', {
@@ -96,101 +97,55 @@ io.on('connection', (socket: Socket) => {
   // Atualizações de NPCs
   socket.on('enemyUpdate', (enemies: GameObject[]) => {
     if (!Array.isArray(enemies)) {
-        console.error('[enemyUpdate] Received non-array data for enemies.');
-        return;
+      console.error('[enemyUpdate] Received non-array data for enemies.');
+      return;
     }
     enemies.forEach(enemy => {
-      if (enemy && typeof enemy.id === 'string' && 
-          typeof enemy.x === 'number' && typeof enemy.y === 'number' &&
-          typeof enemy.width === 'number' && typeof enemy.height === 'number') {
-        gameState.enemies[enemy.id] = { ...enemy, lastUpdate: Date.now() };
+      if (enemy && typeof enemy.id === 'string' &&
+        typeof enemy.x === 'number' && typeof enemy.y === 'number' &&
+        typeof enemy.width === 'number' && typeof enemy.height === 'number') {
+        gameState.dynamicObjects[enemy.id] = { ...enemy, lastUpdate: Date.now() };
       } else {
         console.warn('[enemyUpdate] Received malformed enemy data:', enemy);
       }
     });
-    
+
     // Envia para todos os jogadores (consider sending only diffs or if changed)
-    io.emit('enemiesMoved', gameState.enemies); // Send the updated enemies map or the array
+    io.emit('enemiesMoved', gameState.dynamicObjects); // Send the updated enemies map or the array
   });
 
   // Relatório de colisão aprimorado
   socket.on('collisionReport', (collisionData: CollisionData) => {
-    // Destructure with care, as properties might be missing if client sends malformed CollisionData
-    const { playerId, enemyId, player, enemy } = collisionData || {};
+    const { playerId, objectId, type, player, object } = collisionData;
 
-    // **CRITICAL FIX STARTS HERE**
-    // Validate the data received from the client to prevent crashes
-    if (!collisionData || !playerId || !enemyId || !player || !enemy) {
-      console.error(
-        `[collisionReport] Received incomplete or malformed collisionData. ` +
-        `PlayerID: ${playerId}, EnemyID: ${enemyId}. ` +
-        `Player: ${JSON.stringify(player)}, Enemy: ${JSON.stringify(enemy)}`
-      );
-      socket.emit('invalidCollision', {
-        message: 'Collision report failed: Critical player, enemy, or ID data missing from the report sent by client.'
-      });
-      return; // Stop processing if essential objects or IDs are missing
+    if (!playerId || !objectId || !type || !player || !object || typeof player.x !== 'number' || typeof object.x !== 'number') {
+      console.error(`[collisionReport] Dados de colisão malformados recebidos de ${socket.id}`);
+      socket.emit('invalidReport', { message: 'Dados de colisão inválidos.' });
+      return;
     }
 
-    // Further validation: Check if player and enemy objects have the required properties.
-    // This ensures they are truly GameObject-like before use.
-    if (
-      typeof player.x !== 'number' || typeof player.y !== 'number' || 
-      typeof player.width !== 'number' || typeof player.height !== 'number' ||
-      typeof enemy.x !== 'number' || typeof enemy.y !== 'number' || 
-      typeof enemy.width !== 'number' || typeof enemy.height !== 'number'
-    ) {
-      console.error(
-        `[collisionReport] Received malformed GameObject data: player or enemy object is missing required properties. ` +
-        `PlayerID: ${playerId}, EnemyID: ${enemyId}. ` +
-        `Player: ${JSON.stringify(player)}, Enemy: ${JSON.stringify(enemy)}`
-      );
-      socket.emit('invalidCollision', {
-        message: 'Collision report failed: Player or enemy data is incomplete or properties are malformed.'
-      });
-      return; // Stop processing if properties are missing or types are wrong
-    }
-    // **CRITICAL FIX ENDS HERE**
-    
-    // Update positions in the game state using the client-provided data.
-    // This assumes the client's view of the objects at the time of collision is authoritative for this check.
-    // Consider if these objects should always exist in server's gameState or if client can report new ones.
-    if (gameState.players[playerId]) {
-        gameState.players[playerId] = { ...player, lastUpdate: Date.now() }; // Ensure lastUpdate is set
+    console.log(`[collisionReport] Recebido relatório de colisão de ${playerId} com ${objectId} (tipo: ${type})`);
+
+    if (checkAABBCollision(player, object)) {
+      console.log(`[collisionReport] Colisão VÁLIDA entre ${playerId} e ${objectId}.`);
+
+      if (type === 'obstacle') {
+        socket.emit('collisionResult', {
+          outcome: 'slowdown',
+          objectId: objectId,
+          damage: 25 // Dano definido pelo servidor
+        });
+        delete gameState.dynamicObjects[objectId];
+        io.emit('objectDestroyed', { objectId });
+      } else if (type === 'npc') {
+        socket.emit('collisionResult', {
+          outcome: 'gameOver',
+          objectId: objectId
+        });
+      }
     } else {
-        console.warn(`[collisionReport] Player with ID ${playerId} not found in server state. Client sent: ${JSON.stringify(player)}. Trusting client data for now.`);
-        gameState.players[playerId] = { ...player, lastUpdate: Date.now() }; // Or handle as error
-    }
-
-    if (gameState.enemies[enemyId]) {
-        gameState.enemies[enemyId] = { ...enemy, lastUpdate: Date.now() }; // Ensure lastUpdate is set
-    } else {
-        console.warn(`[collisionReport] Enemy with ID ${enemyId} not found in server state. Client sent: ${JSON.stringify(enemy)}. Trusting client data for now.`);
-        gameState.enemies[enemyId] = { ...enemy, lastUpdate: Date.now() }; // Or handle as error
-    }
-
-    // Now, player and enemy are confirmed to be valid GameObject-like structures.
-    if (checkAABBCollision(player, enemy)) {
-      io.emit('validCollision', {
-        playerId,
-        enemyId,
-        timestamp: Date.now(),
-        position: { // Send back the positions that were validated
-          playerX: player.x,
-          playerY: player.y,
-          enemyX: enemy.x,
-          enemyY: enemy.y
-        }
-      });
-      
-      console.log(`[collisionReport] Colisão VÁLIDA detectada e emitida entre ${playerId} e ${enemyId}`);
-    } else {
-      // This case means the client reported a collision, but the server's AABB check 
-      // with the *client-provided data* did not confirm it.
-      socket.emit('invalidCollision', {
-        message: 'Server-side AABB check did not confirm the client-reported collision using the provided object states.'
-      });
-      console.log(`[collisionReport] Discrepância: Cliente reportou colisão entre ${playerId} e ${enemyId}, mas a verificação AABB no servidor (com dados do cliente) FALHOU.`);
+      console.warn(`[collisionReport] Discrepância. Cliente ${playerId} reportou colisão com ${objectId} que FALHOU na validação do servidor.`);
+      socket.emit('collisionResult', { outcome: 'invalid', objectId: objectId });
     }
   });
 
@@ -209,7 +164,7 @@ function checkAABBCollision(obj1: GameObject, obj2: GameObject): boolean {
   if (!obj1 || !obj2) {
     // This should ideally not be reached if call sites validate inputs.
     console.error("[checkAABBCollision] FATAL: Called with undefined GameObject(s). This indicates a bug in the calling code.");
-    return false; 
+    return false;
   }
   return (
     obj1.x < obj2.x + obj2.width &&
@@ -221,17 +176,17 @@ function checkAABBCollision(obj1: GameObject, obj2: GameObject): boolean {
 
 // Função de validação antiga (mantida para compatibilidade, mas consider reviewing its usage)
 // This function uses server's current gameState, not client-provided state at time of collision.
-function validateCollision(playerId: string, enemyId: string): boolean {
+function validateCollision(playerId: string, objectId: string): boolean {
   const player = gameState.players[playerId];
-  const enemy = gameState.enemies[enemyId];
-  
+  const dynamicObject = gameState.dynamicObjects[objectId];
+
   // This correctly checks if they exist in the current server state
-  if (!player || !enemy) {
-    console.warn(`[validateCollision] Player (${playerId}) or Enemy (${enemyId}) not found in current server state.`);
+  if (!player || !dynamicObject) {
+    console.warn(`[validateCollision] Player (${playerId}) or DynamicObject (${objectId}) not found in current server state.`);
     return false;
   }
 
-  return checkAABBCollision(player, enemy);
+  return checkAABBCollision(player, dynamicObject);
 }
 
 AppDataSource.initialize()
