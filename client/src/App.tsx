@@ -6,10 +6,11 @@ import Login from "./Login"; // Importe o novo componente
 // Interface para as props do componente Game
 interface GameProps {
   username: string;
+  onPlayAgain: () => void;
 }
 
 // Seu componente Game, agora recebendo a prop 'username'
-const Game: React.FC<GameProps> = ({ username }) => {
+const Game: React.FC<GameProps> = ({ username, onPlayAgain }) => {
   const gameRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -20,12 +21,13 @@ const Game: React.FC<GameProps> = ({ username }) => {
     
     // Usa o Registry para passar dados para as cenas do Phaser
     game.registry.set('username', username);
+    game.registry.set('onPlayAgain', onPlayAgain);
 
     return () => {
       game.destroy(true);
     };
     // Adicione username à lista de dependências do useEffect
-  }, [username]);
+  }, [username, onPlayAgain]);
 
   return <div ref={gameRef} id="game-container" />;
 };
@@ -41,13 +43,18 @@ const App: React.FC = () => {
     setUsername(name);
   };
 
+  const handlePlayAgain = () => {
+    setUsername(null);
+  };
+
+
   return (
     <div className="app-container">
       {/* Renderização condicional: se não há username, mostra o Login. Senão, mostra o Jogo. */}
       {!username ? (
         <Login onLogin={handleLogin} />
       ) : (
-        <Game username={username} />
+        <Game username={username} onPlayAgain={handlePlayAgain} />
       )}
     </div>
   );

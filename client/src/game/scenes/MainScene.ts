@@ -258,7 +258,7 @@ class MainScene extends Phaser.Scene {
         }
     }
 
-    // NOVO: Função centralizada para aplicar o efeito de lentidão
+    // Função centralizada para aplicar o efeito de lentidão
     private applySlowdownEffect() {
         if (this.isSlowed) return;
         this.isSlowed = true;
@@ -273,38 +273,39 @@ class MainScene extends Phaser.Scene {
         this.obstacles.getChildren().forEach(obj => (obj as Phaser.Physics.Arcade.Sprite).setVelocityY(this.slowObstacleSpeed));
         this.npcs.getChildren().forEach(obj => (obj as Vehicle).body.setVelocityY(this.boostedNpcSpeed));
 
-        // 2. Define a função que REVERTE TUDO
-        const onSlowdownComplete = () => {
-            if (!this.scene.isActive()) return; // Não faz nada se a cena já mudou
-
+        const onRecoveryComplete = () => {
+            if (!this.scene.isActive()) return; // Proteção extra
+            console.log("Recuperação de velocidade completa. Resetando estado.");
             this.isSlowed = false;
-            (this.playerVehicle.list[0] as Phaser.GameObjects.Sprite).setAlpha(1);
-            (this.playerVehicle.list[1] as Phaser.GameObjects.Sprite).setAlpha(1);
+        };
 
-            // As animações abaixo garantem que a velocidade volte ao normal gradualmente
-            const tweenDuration = this.slowDuration * 0.75;
+        const tweenDuration = this.slowDuration * 0.75;
 
-            // Anima a velocidade do fundo de volta ao normal
-            this.tweens.add({
-                targets: this,
-                backgroundScrollSpeed: this.normalBackgroundSpeed,
-                duration: tweenDuration,
-                ease: 'Sine.In'
-            });
+        this.tweens.add({
+            targets: this,
+            backgroundScrollSpeed: this.normalBackgroundSpeed,
+            duration: tweenDuration,
+            ease: 'Sine.In',
+            onComplete: onRecoveryComplete // <-- O estado é resetado AQUI!
+        });
 
-            // Anima a velocidade dos objetos existentes de volta ao normal
-            this.obstacles.getChildren().forEach(obj => {
+        (this.playerVehicle.list[0] as Phaser.GameObjects.Sprite).setAlpha(1);
+        (this.playerVehicle.list[1] as Phaser.GameObjects.Sprite).setAlpha(1);
+
+        this.obstacles.getChildren().forEach(obj => {
+            if ((obj as Phaser.Physics.Arcade.Sprite).body) {
                 const body = (obj as Phaser.Physics.Arcade.Sprite).body;
                 if (body && body.velocity) {
                     this.tweens.add({ targets: body.velocity, y: this.normalObstacleSpeed, duration: tweenDuration, ease: 'Sine.In' });
                 }
-            });
-            this.npcs.getChildren().forEach(obj => {
-                if ((obj as Vehicle).body) {
-                    this.tweens.add({ targets: (obj as Vehicle).body.velocity, y: this.normalNpcSpeed, duration: tweenDuration, ease: 'Sine.In' });
-                }
-            });
-        }
+            }
+        });
+
+        this.npcs.getChildren().forEach(obj => {
+            if ((obj as Vehicle).body) {
+                this.tweens.add({ targets: (obj as Vehicle).body.velocity, y: this.normalNpcSpeed, duration: tweenDuration, ease: 'Sine.In' });
+            }
+        });
     }
 
     private updateHpBar() {
@@ -331,53 +332,58 @@ class MainScene extends Phaser.Scene {
         if (this.isWaitingForServer || obstacle.getData('hit')) return;
         obstacle.setData('hit', true); // Marca o obstáculo para não reportar de novo
         this.isWaitingForServer = true; // Bloqueia novos reports até o servidor responder
-        const bounds = obstacle.getBounds();
         const collisionData = {
             playerId: this.playerId,
             objectId: obstacle.name,
-            type: 'obstacle',
+            type: 'obstacle' as const,
             player: {
-                x: playerVehicle.x,
-                y: playerVehicle.y,
+                id: this.playerId,
+                x: playerVehicle.body.x,
+                y: playerVehicle.body.y,
                 width: playerVehicle.body.width,
                 height: playerVehicle.body.height,
+                lastUpdate: Date.now()
             },
             object: {
-                x: obstacle.x,
-                y: obstacle.y,
-                width: bounds.width,
-                height: bounds.height,
+                id: obstacle.name,
+                x: obstacle.body ? obstacle.body.x : obstacle.x,
+                y: obstacle.body ? obstacle.body.y : obstacle.y,
+                width: obstacle.body ? obstacle.body.width : obstacle.displayWidth,
+                height: obstacle.body ? obstacle.body.height : obstacle.displayHeight,
+                lastUpdate: Date.now()
             }
         };
         this.socket.emit("collisionReport", collisionData);
         obstacle.setVisible(false);
     }
 
-    handleNpcCollision(_playerVehicle: Vehicle, npc: Vehicle) {
+    handleNpcCollision(playerVehicle: Vehicle, npc: Vehicle) {
         if (this.isWaitingForServer || npc.getData('hit')) return;
 
         npc.setData('hit', true);
         this.isWaitingForServer = true;
 
-        const bounds = (npc.list[0] as Phaser.GameObjects.Sprite).getBounds();
-
         const collisionData = {
             playerId: this.playerId,
             objectId: npc.name,
-            type: 'npc',
+            type: 'npc' as const,
             player: {
-                x: _playerVehicle.x,
-                y: _playerVehicle.y,
-                width: _playerVehicle.body.width,
-                height: _playerVehicle.body.height,
+                id: this.playerId,
+                x: playerVehicle.body.x,
+                y: playerVehicle.body.y,
+                width: playerVehicle.body.width,
+                height: playerVehicle.body.height,
+                lastUpdate: Date.now()
             },
             object: {
-                x: npc.x,
-                y: npc.y,
+                id: npc.name,
+                x: npc.body.x,
+                y: npc.body.y,
                 width: npc.body.width,
                 height: npc.body.height,
+                lastUpdate: Date.now()
             }
-        };
+        }
 
         this.socket.emit("collisionReport", collisionData);
     }

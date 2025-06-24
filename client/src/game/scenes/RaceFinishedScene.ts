@@ -62,7 +62,12 @@ export class RaceFinishedScene extends Phaser.Scene {
         }).setOrigin(0.5).setInteractive();
 
         playAgainButton.on('pointerdown', () => {
-            this.scene.start('MainScene', { username: data.username });
+            const onPlayAgainCallback = this.registry.get('onPlayAgain');
+            if (onPlayAgainCallback) {
+                onPlayAgainCallback();
+            } else {
+                this.scene.start('MainScene', { username: data.username });
+            }
         });
     }
 }
