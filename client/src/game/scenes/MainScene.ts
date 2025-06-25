@@ -8,9 +8,17 @@ interface ObstacleData {
     height: number;
 }
 
+interface RaceResultData {
+  finalTime: number;
+  highscores: { username: string; time: number }[];
+}
+
 type Vehicle = Phaser.GameObjects.Container & { body: Phaser.Physics.Arcade.Body };
 
 class MainScene extends Phaser.Scene {
+    private userId!: number;
+    private userToken!: string;
+
     private socket!: SocketIOClient.Socket;
     private background!: Phaser.GameObjects.TileSprite;
     private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -104,6 +112,16 @@ class MainScene extends Phaser.Scene {
         this.socket.on("connect", () => {
             console.log(`Conectado ao servidor como ${this.username} (ID: ${this.socket.id})`);
             this.playerId = this.socket.id;
+
+            this.socket.on('race:result', (data: RaceResultData) => {
+                console.log('Servidor confirmou fim de corrida.', data);
+                // Inicia a cena de final de corrida com os dados do SERVIDOR
+                this.scene.start('RaceFinishedScene', {
+                    username: this.username,
+                    time: data.finalTime,
+                    highscores: data.highscores
+                });
+            });
         });
 
         // NOVO: Listener para o resultado da colisão vindo do servidor
@@ -135,10 +153,15 @@ class MainScene extends Phaser.Scene {
                 case 'gameOver':
                     this.triggerGameOver(collidedObject as Vehicle);
                     break;
-                // Adicione outros casos se necessário
             }
         });
 
+        const userData = this.registry.get('user');
+        if (userData) {
+            this.username = userData.name || 'Jogador Anônimo';
+            this.userId = userData.id;
+            this.userToken = userData.token;
+        }
 
         const { width, height } = this.cameras.main;
         this.background = this.add.tileSprite(width / 2, height / 2, 1026, 1798, "background");
@@ -414,6 +437,9 @@ class MainScene extends Phaser.Scene {
 
             this.obstacleTimer.paused = false;
             this.npcTimer.paused = false;
+
+            console.log("Corrida iniciada!");
+            this.socket.emit('race:start');
         }
 
         if (this.raceStarted) {
@@ -428,7 +454,7 @@ class MainScene extends Phaser.Scene {
                 }
 
                 // --- GATILHO DA SEQUÊNCIA FINAL ---
-                if (this.finishLine.y > 0) {
+                if (this.finishLine.y > 0 && !this.isFinishSequenceActive) { // Adicionado !isFinishSequenceActive
                     this.isFinishSequenceActive = true;
                     this.startFinishSequence();
                 }
@@ -439,16 +465,15 @@ class MainScene extends Phaser.Scene {
                 // 5. Verifica se o jogador cruzou a linha para PARAR O TIMER
                 if (!this.finalTimeRecorded && Phaser.Geom.Intersects.RectangleToRectangle(this.playerVehicle.getBounds(), this.finishLine.getBounds())) {
                     this.finalTimeRecorded = true;
-                    this.finalTime = (time - this.raceStartTime) / 1000;
-                }
+                    // this.finalTime = (time - this.raceStartTime) / 1000;
+                    this.playerVehicle.body.setAccelerationY(-500); // Dá um boost final
+                    this.playerVehicle.body.setDragY(0.1);
 
-                // 6. Verifica se o jogador saiu da tela para MUDAR DE CENA
-                if (this.playerVehicle.y < -this.playerVehicle.height) {
-                    this.scene.start('RaceFinishedScene', {
-                        username: this.username,
-                        time: this.finalTime
-                    });
+                    // Envia o token para o servidor saber quem terminou.
+                    console.log("Notificando servidor: linha de chegada cruzada!");
+                    this.socket.emit('race:finish', { token: this.userToken });
                 }
+                
             }
         }
 
@@ -464,16 +489,6 @@ class MainScene extends Phaser.Scene {
                 isSlowed: this.isSlowed
             });
         }
-
-        // Verifica se cruzou a linha de chegada
-        if (this.playerVehicle.y < this.finishLine.y + this.finishLine.height) {
-            const raceTotalTime = (time - this.raceStartTime) / 1000; // Tempo em segundos
-            this.scene.start('RaceFinishedScene', {
-                username: this.username,
-                time: raceTotalTime
-            });
-        }
-
 
     }
 

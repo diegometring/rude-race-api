@@ -4,6 +4,9 @@ import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { AppDataSource } from './data-source';
 import app from './app';
+import { createMatch } from './controller/user';
+import { getTopMatchesAsService, saveMatch } from './services/matchService';
+import { verifyToken } from './security/jwt';
 
 dotenv.config();
 
@@ -22,6 +25,14 @@ interface GameState {
   players: Record<string, GameObject>;
   dynamicObjects: Record<string, GameObject>;
 }
+
+interface RaceState {
+  [socketId: string]: {
+    startTime: number;
+    userId: number;
+  };
+}
+const raceStates: RaceState = {};
 
 interface CollisionData {
   playerId: string;
@@ -94,6 +105,62 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
+    socket.on('race:start', () => {
+        // O token pode ser verificado aqui também se quiser mais segurança
+        console.log(`[race:start] Corrida iniciada para o socket: ${socket.id}`);
+        raceStates[socket.id] = { startTime: Date.now(), userId: 0 }; // userId será preenchido depois
+    });
+
+    socket.on('race:finish', async (data: { token: string }) => {
+        try {
+            if (!raceStates[socket.id]) {
+                throw new Error("Corrida não foi iniciada para este jogador.");
+            }
+
+            // 1. Validar o token
+            const decoded = verifyToken(data.token);
+            if (!decoded || !decoded.userId) {
+                throw new Error("Token inválido ou expirado.");
+            }
+            const userId = Number(decoded.userId);
+            raceStates[socket.id].userId = userId;
+
+            // 2. Calcular o tempo no servidor
+            const startTime = raceStates[socket.id].startTime;
+            const finalTime = (Date.now() - startTime) / 1000; // Tempo em segundos
+
+            // 3. Verificação Anti-Cheat (Sanity Check)
+            const MIN_RACE_TIME_SECONDS = 10; // Ex: Uma corrida de 5000 unidades não pode durar menos de 10s
+            if (finalTime < MIN_RACE_TIME_SECONDS) {
+                console.warn(`[ANTI-CHEAT] Jogador ${userId} reportou tempo suspeito: ${finalTime}s`);
+                // Decide o que fazer: desconectar, ignorar, etc.
+                delete raceStates[socket.id];
+                return; 
+            }
+
+            console.log(`[race:finish] Jogador ${userId} terminou em ${finalTime.toFixed(2)}s`);
+
+            // 4. Salvar a partida no banco de dados
+            await saveMatch(userId, finalTime);
+
+            // 5. Obter o novo placar
+            const highscores = await getTopMatchesAsService(10);
+
+            // 6. Enviar o resultado oficial de volta para o cliente
+            socket.emit('race:result', {
+                finalTime: finalTime,
+                highscores: highscores
+            });
+
+            // Limpa o estado da corrida para este jogador
+            delete raceStates[socket.id];
+
+        } catch (error: any) {
+            console.error(`Erro ao finalizar a corrida para ${socket.id}:`, error.message);
+            socket.emit('race:error', { message: error.message });
+        }
+    });  
+
   // Atualizações de NPCs
   socket.on('enemyUpdate', (enemies: GameObject[]) => {
     if (!Array.isArray(enemies)) {
@@ -150,6 +217,9 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('disconnect', () => {
+    if (raceStates[socket.id]) {
+      delete raceStates[socket.id];
+    }
     console.log(`[disconnect] Jogador desconectado: ${socket.id}`);
     delete gameState.players[socket.id];
     io.emit('playerDisconnected', socket.id);

@@ -5,6 +5,7 @@ import { AppDataSource } from '../data-source';
 import { User } from '../entity/User';
 import { Match } from '../entity/Match';
 import { Between } from 'typeorm';
+import { saveMatch } from '../services/matchService';
 
 export const createUser = async (req: Request, res: Response): Promise<void> => {
     const { name } = req.body;
@@ -106,31 +107,24 @@ export const getTopMatches = async (req: Request, res: Response): Promise<void> 
 };
 
 export const createMatch = async (req: Request, res: Response): Promise<void>  => {
-    const { id } = req.params;
-    const { score, playedAt } = req.body;
+    try {
+        const userId = Number(req.params.id);
+        const { score } = req.body; // O score vem do corpo da requisição
 
-    const userRepository = AppDataSource.getRepository(User);
-    const matchRepository = AppDataSource.getRepository(Match);
+        if (score === undefined || typeof score !== 'number') {
+            res.status(400).json({ message: 'O campo "score" é obrigatório e deve ser um número.' });
+            return;
+        }
 
-    const user = await userRepository.findOneBy({ id: Number(id) });
+        // Chama a função de serviço com os dados extraídos da requisição
+        const newMatch = await saveMatch(userId, score);
+        
+        res.status(201).json(newMatch);
 
-    if (!user) {
-        res.status(404).json({ message: 'User not found' });
-        return;
+    } catch (error: any) {
+        // Se o serviço der um erro (ex: usuário não encontrado), ele será capturado aqui
+        res.status(404).json({ message: error.message });
     }
-    if (typeof score !== 'number') {
-        res.status(400).json({ message: 'Score must be a number' });
-        return;
-    }
-
-    const match = new Match();
-    match.user = user;
-    match.score = score;
-    match.playedAt = playedAt ? new Date(playedAt) : new Date();
-    
-    await matchRepository.save(match);
-
-    res.status(201).json(match);
-    return;
 };
+
 

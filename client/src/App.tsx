@@ -1,60 +1,64 @@
 import React, { useEffect, useRef, useState } from "react";
 import Phaser from "phaser";
-import GameConfig from "./game/GameConfig"; // Mantenha seu GameConfig
-import Login from "./Login"; // Importe o novo componente
+import GameConfig from "./game/GameConfig";
+import Login from "./Login";
 
 // Interface para as props do componente Game
+interface UserData {
+  id: number;
+  name: string;
+  token: string;
+}
+
 interface GameProps {
-  username: string;
+  user: UserData; // Agora recebe o objeto de usuário completo
   onPlayAgain: () => void;
 }
 
 // Seu componente Game, agora recebendo a prop 'username'
-const Game: React.FC<GameProps> = ({ username, onPlayAgain }) => {
+const Game: React.FC<GameProps> = ({ user, onPlayAgain }) => {
   const gameRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!gameRef.current) return;
 
-    // Inicia o jogo com a configuração
     const game = new Phaser.Game({ ...GameConfig, parent: gameRef.current });
     
-    // Usa o Registry para passar dados para as cenas do Phaser
-    game.registry.set('username', username);
+    // Passando o objeto de usuário inteiro para o Phaser
+    game.registry.set('user', user);
     game.registry.set('onPlayAgain', onPlayAgain);
 
     return () => {
       game.destroy(true);
     };
-    // Adicione username à lista de dependências do useEffect
-  }, [username, onPlayAgain]);
+  }, [user, onPlayAgain]);
 
   return <div ref={gameRef} id="game-container" />;
 };
 
-
 // Componente principal App
 const App: React.FC = () => {
-  // Estado para armazenar o nome de usuário. null significa que não logou ainda.
-  const [username, setUsername] = useState<string | null>(null);
+  // Estado para armazenar o objeto de usuário. null significa que não logou.
+  const [user, setUser] = useState<UserData | null>(null);
 
-  // Função que será chamada pelo componente Login
-  const handleLogin = (name: string) => {
-    setUsername(name);
+  // Função que será chamada pelo componente Login com os dados da API
+  const handleLogin = (userData: UserData) => {
+    // Salva o token para uso futuro (opcional, mas boa prática)
+    localStorage.setItem('jwt_token', userData.token);
+    setUser(userData);
   };
 
   const handlePlayAgain = () => {
-    setUsername(null);
+    localStorage.removeItem('jwt_token');
+    setUser(null);
   };
-
 
   return (
     <div className="app-container">
-      {/* Renderização condicional: se não há username, mostra o Login. Senão, mostra o Jogo. */}
-      {!username ? (
+      {!user ? (
         <Login onLogin={handleLogin} />
       ) : (
-        <Game username={username} onPlayAgain={handlePlayAgain} />
+        <Game user={user} onPlayAgain={handlePlayAgain} />
       )}
     </div>
   );

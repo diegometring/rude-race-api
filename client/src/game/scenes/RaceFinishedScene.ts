@@ -10,7 +10,7 @@ export class RaceFinishedScene extends Phaser.Scene {
         super({ key: 'RaceFinishedScene' });
     }
 
-    create(data: { username: string, time: number }) {
+    create(data: { username: string, time: number, highscores: any[] }) {
         const { width, height } = this.cameras.main;
 
         this.add.text(width / 2, 50, 'CORRIDA CONCLUÍDA!', { 
@@ -21,24 +21,7 @@ export class RaceFinishedScene extends Phaser.Scene {
             fontSize: '32px', color: '#ffffff' 
         }).setOrigin(0.5);
 
-        // --- LÓGICA DO PLACAR DE LÍDERES ---
-        const newScore: Score = { username: data.username, time: data.time };
-        
-        // 1. Pega os scores antigos do localStorage
-        const highscoresRaw = localStorage.getItem('highscores');
-        let highscores: Score[] = highscoresRaw ? JSON.parse(highscoresRaw) : [];
-
-        // 2. Adiciona o novo score
-        highscores.push(newScore);
-
-        // 3. Ordena por tempo (menor para o maior)
-        highscores.sort((a, b) => a.time - b.time);
-
-        // 4. Mantém apenas os 10 melhores
-        highscores = highscores.slice(0, 10);
-
-        // 5. Salva de volta no localStorage
-        localStorage.setItem('highscores', JSON.stringify(highscores));
+        const highscores = data.highscores;
 
         // --- EXIBIÇÃO DO PLACAR ---
         this.add.text(width / 2, 200, 'Top 10 Melhores Tempos', { 
